@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
+const videoRoutes = require("./routes/videoRoutes");
 
 const app = express();
 
@@ -21,6 +22,8 @@ app.get("/", (req, res) => {
     message: "YT Insights API is running",
   });
 });
+
+app.use("/api/videos", videoRoutes);
 
 const startServer = async () => {
   await connectDB();
