@@ -1,7 +1,8 @@
 const AudienceAnalytics = require("../models/AudienceAnalytics");
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const YOUTUBE_API_URL = "https://youtube.googleapis.com/youtube/v3/commentThreads";
+const YOUTUBE_API_URL =
+  "https://youtube.googleapis.com/youtube/v3/commentThreads";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const BRIEF_COMMENT_LIMIT = 100;
 const DETAILED_COMMENT_LIMIT = 1000;
@@ -37,7 +38,10 @@ const fetchLatestComments = async (videoId, limit) => {
     const url = new URL(YOUTUBE_API_URL);
     url.searchParams.set("part", "snippet");
     url.searchParams.set("videoId", videoId);
-    url.searchParams.set("maxResults", String(Math.min(100, limit - comments.length)));
+    url.searchParams.set(
+      "maxResults",
+      String(Math.min(100, limit - comments.length)),
+    );
     url.searchParams.set("order", "time");
     url.searchParams.set("textFormat", "plainText");
     url.searchParams.set("key", apiKey);
@@ -49,20 +53,28 @@ const fetchLatestComments = async (videoId, limit) => {
     if (!response.ok) {
       const reason = payload?.error?.errors?.[0]?.reason;
       const message = payload?.error?.message;
-      const error = new Error(message || "YouTube comments could not be fetched.");
-      if (response.status === 403 && ["commentsDisabled", "forbidden"].includes(reason)) {
+      const error = new Error(
+        message || "YouTube comments could not be fetched.",
+      );
+      if (
+        response.status === 403 &&
+        ["commentsDisabled", "forbidden"].includes(reason)
+      ) {
         error.statusCode = 422;
-        error.publicMessage = "Comments are disabled or unavailable for this video.";
+        error.publicMessage =
+          "Comments are disabled or unavailable for this video.";
         error.code = "COMMENTS_UNAVAILABLE";
       } else if (response.status === 404) {
         error.statusCode = 404;
         error.publicMessage = "The video could not be found.";
       } else if (response.status === 403 && /quota/i.test(message || "")) {
         error.statusCode = 503;
-        error.publicMessage = "The YouTube API quota has been reached. Please try again later.";
+        error.publicMessage =
+          "The YouTube API quota has been reached. Please try again later.";
       } else {
         error.statusCode = 502;
-        error.publicMessage = "YouTube could not provide comments for this video.";
+        error.publicMessage =
+          "YouTube could not provide comments for this video.";
       }
       throw error;
     }
@@ -70,11 +82,12 @@ const fetchLatestComments = async (videoId, limit) => {
     const items = Array.isArray(payload.items) ? payload.items : [];
     for (const item of items) {
       const snippet = item?.snippet?.topLevelComment?.snippet;
-      const text = typeof snippet?.textDisplay === "string"
-        ? snippet.textDisplay
-        : typeof snippet?.textOriginal === "string"
-          ? snippet.textOriginal
-          : "";
+      const text =
+        typeof snippet?.textDisplay === "string"
+          ? snippet.textDisplay
+          : typeof snippet?.textOriginal === "string"
+            ? snippet.textOriginal
+            : "";
       if (!text.trim()) continue;
       comments.push({
         text: text.replace(/\s+/g, " ").trim().slice(0, COMMENT_TEXT_LIMIT),
@@ -103,10 +116,28 @@ const makePrompt = (comments, mode) => {
   const baseShape = {
     summary: "A concise evidence-based summary of audience feedback.",
     sentiment: { positive: 0, neutral: 0, negative: 0 },
-    themes: [{ name: "Theme", percentage: 0, explanation: "Paraphrased explanation; no direct quotes." }],
-    questions: [{ question: "Paraphrased recurring question", frequency: "Common / occasional / rare" }],
-    painPoints: [{ issue: "Paraphrased concern", percentage: 0, explanation: "Why viewers raise it." }],
-    audienceProfile: "What the comments suggest about viewer needs and experience.",
+    themes: [
+      {
+        name: "Theme",
+        percentage: 0,
+        explanation: "Paraphrased explanation; no direct quotes.",
+      },
+    ],
+    questions: [
+      {
+        question: "Paraphrased recurring question",
+        frequency: "Common / occasional / rare",
+      },
+    ],
+    painPoints: [
+      {
+        issue: "Paraphrased concern",
+        percentage: 0,
+        explanation: "Why viewers raise it.",
+      },
+    ],
+    audienceProfile:
+      "What the comments suggest about viewer needs and experience.",
     contentSuggestions: ["Actionable content idea grounded in comments."],
   };
 
@@ -153,7 +184,10 @@ const parseModelJson = (content) => {
   if (typeof content !== "string" || !content.trim()) {
     throw new Error("The AI provider returned an empty response.");
   }
-  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const cleaned = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
   const parsed = JSON.parse(cleaned);
   if (
     typeof parsed.summary !== "string" ||
@@ -163,7 +197,9 @@ const parseModelJson = (content) => {
     !Array.isArray(parsed.painPoints) ||
     !Array.isArray(parsed.contentSuggestions)
   ) {
-    throw new Error("The AI provider returned an unexpected analytics structure.");
+    throw new Error(
+      "The AI provider returned an unexpected analytics structure.",
+    );
   }
 
   // Keep the stored result limited to derived analytics. Never pass through source comments.
@@ -172,7 +208,12 @@ const parseModelJson = (content) => {
     return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0;
   };
   const cleanText = (value, max = 500) =>
-    typeof value === "string" ? value.replace(/[\u0000-\u001F\u007F]/g, " ").trim().slice(0, max) : "";
+    typeof value === "string"
+      ? value
+          .replace(/[\u0000-\u001F\u007F]/g, " ")
+          .trim()
+          .slice(0, max)
+      : "";
 
   const analytics = {
     summary: cleanText(parsed.summary, 2000),
@@ -196,23 +237,51 @@ const parseModelJson = (content) => {
       explanation: cleanText(item?.explanation, 500),
     })),
     audienceProfile: cleanText(parsed.audienceProfile, 1500),
-    contentSuggestions: parsed.contentSuggestions.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean),
+    contentSuggestions: parsed.contentSuggestions
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean),
   };
 
-  if (Array.isArray(parsed.keyTakeaways)) analytics.keyTakeaways = parsed.keyTakeaways.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (Array.isArray(parsed.viewerIntent)) analytics.viewerIntent = parsed.viewerIntent.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (Array.isArray(parsed.contentRequests)) analytics.contentRequests = parsed.contentRequests.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (Array.isArray(parsed.strengths)) analytics.strengths = parsed.strengths.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (Array.isArray(parsed.criticisms)) analytics.criticisms = parsed.criticisms.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (Array.isArray(parsed.recommendedActions)) analytics.recommendedActions = parsed.recommendedActions.slice(0, 8).map((item) => cleanText(item, 300)).filter(Boolean);
-  if (typeof parsed.limitations === "string") analytics.limitations = cleanText(parsed.limitations, 1000);
+  if (Array.isArray(parsed.keyTakeaways))
+    analytics.keyTakeaways = parsed.keyTakeaways
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (Array.isArray(parsed.viewerIntent))
+    analytics.viewerIntent = parsed.viewerIntent
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (Array.isArray(parsed.contentRequests))
+    analytics.contentRequests = parsed.contentRequests
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (Array.isArray(parsed.strengths))
+    analytics.strengths = parsed.strengths
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (Array.isArray(parsed.criticisms))
+    analytics.criticisms = parsed.criticisms
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (Array.isArray(parsed.recommendedActions))
+    analytics.recommendedActions = parsed.recommendedActions
+      .slice(0, 8)
+      .map((item) => cleanText(item, 300))
+      .filter(Boolean);
+  if (typeof parsed.limitations === "string")
+    analytics.limitations = cleanText(parsed.limitations, 1000);
 
   return analytics;
 };
 
 const analyzeComments = async (comments, mode) => {
   const apiKey = getRequiredEnv("OPENROUTER_API_KEY");
-  const model = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+  const model = (process.env.OPENROUTER_MODEL || "openrouter/free").trim();
   const headers = {
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
@@ -236,36 +305,55 @@ const analyzeComments = async (comments, mode) => {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload?.error?.message || "The AI provider request failed.");
+    const error = new Error(
+      payload?.error?.message || "The AI provider request failed.",
+    );
     error.statusCode = 502;
-    error.publicMessage = "Audience analysis could not be generated right now. Please try again.";
+    error.publicMessage =
+      "Audience analysis could not be generated right now. Please try again.";
     throw error;
   }
 
   const content = payload?.choices?.[0]?.message?.content;
-  return { analytics: parseModelJson(content), model };
+  // OpenRouter may return the concrete model selected by the free router. Store
+  // that model when available, otherwise retain the configured router/model ID.
+  const selectedModel =
+    typeof payload?.model === "string" && payload.model.trim()
+      ? payload.model
+      : model;
+  return { analytics: parseModelJson(content), model: selectedModel };
 };
 
 const sendAudienceError = (res, error) => {
   const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
-  if (status >= 500) console.error("Audience analysis request failed:", error.message);
+  if (status >= 500)
+    console.error("Audience analysis request failed:", error.message);
   return res.status(status).json({
     success: false,
     code: error.code || "AUDIENCE_ANALYSIS_FAILED",
-    message: error.publicMessage || "Audience analysis could not be completed. Please try again later.",
+    message:
+      error.publicMessage ||
+      "Audience analysis could not be completed. Please try again later.",
   });
 };
 
 const getAudienceAnalysis = (mode) => async (req, res) => {
   const { videoId } = req.params;
   if (!isValidVideoId(videoId)) {
-    return res.status(400).json({ success: false, message: "A valid 11-character YouTube video ID is required." });
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "A valid 11-character YouTube video ID is required.",
+      });
   }
 
   const detailed = mode === "detailed";
   const analyticsField = detailed ? "detailedAnalytics" : "briefAnalytics";
   const analyzedAtField = detailed ? "detailedAnalyzedAt" : "briefAnalyzedAt";
-  const commentsCountField = detailed ? "detailedCommentsAnalyzed" : "briefCommentsAnalyzed";
+  const commentsCountField = detailed
+    ? "detailedCommentsAnalyzed"
+    : "briefCommentsAnalyzed";
   const limit = detailed ? DETAILED_COMMENT_LIMIT : BRIEF_COMMENT_LIMIT;
 
   try {
