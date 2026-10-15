@@ -291,37 +291,71 @@ const analyzeComments = async (comments, mode) => {
     headers["HTTP-Referer"] = process.env.OPENROUTER_SITE_URL;
   }
 
-  const response = await fetch(OPENROUTER_API_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model,
-      messages: makePrompt(comments, mode),
-      temperature: 0.2,
-      max_tokens: mode === "detailed" ? 4500 : 2200,
-      response_format: { type: "json_object" },
-    }),
-    signal: AbortSignal.timeout(mode === "detailed" ? 100000 : 60000),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(
-      payload?.error?.message || "The AI provider request failed.",
-    );
-    error.statusCode = 502;
-    error.publicMessage =
-      "Audience analysis could not be generated right now. Please try again.";
-    throw error;
+  const baseMessages = makePrompt(comments, mode);
+  let lastParseError;
+
+  // Some free models occasionally return malformed JSON despite JSON mode. Retry
+  // once with a stricter instruction instead of failing the whole Audience request.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const messages =
+      attempt === 0
+        ? baseMessages
+        : [
+            ...baseMessages,
+            {
+              role: "system",
+              content:
+                "IMPORTANT: Your previous output was invalid JSON. Regenerate the complete analytics object. Output one valid JSON object only. Escape all quotation marks and newline characters inside strings. Do not use markdown fences or truncate the response.",
+            },
+          ];
+
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: attempt === 0 ? 0.2 : 0,
+        max_tokens: mode === "detailed" ? 6000 : 3000,
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(mode === "detailed" ? 100000 : 60000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(
+        payload?.error?.message || "The AI provider request failed.",
+      );
+      error.statusCode = 502;
+      error.publicMessage =
+        "Audience analysis could not be generated right now. Please try again.";
+      throw error;
+    }
+
+    const choice = payload?.choices?.[0];
+    const content = choice?.message?.content;
+    const selectedModel =
+      typeof payload?.model === "string" && payload.model.trim()
+        ? payload.model
+        : model;
+
+    try {
+      return { analytics: parseModelJson(content), model: selectedModel };
+    } catch (error) {
+      lastParseError = error;
+      // A length finish reason often means the model stopped mid-JSON. Retry once
+      // with a larger output budget; don't log the generated content.
+      if (attempt === 1) break;
+    }
   }
 
-  const content = payload?.choices?.[0]?.message?.content;
-  // OpenRouter may return the concrete model selected by the free router. Store
-  // that model when available, otherwise retain the configured router/model ID.
-  const selectedModel =
-    typeof payload?.model === "string" && payload.model.trim()
-      ? payload.model
-      : model;
-  return { analytics: parseModelJson(content), model: selectedModel };
+  const error = new Error(
+    `The AI provider returned invalid JSON after retry: ${lastParseError?.message || "unknown parse error"}`,
+  );
+  error.statusCode = 502;
+  error.publicMessage =
+    "The AI model returned an invalid analysis. Please try again; no raw comments were saved.";
+  throw error;
 };
 
 const sendAudienceError = (res, error) => {
