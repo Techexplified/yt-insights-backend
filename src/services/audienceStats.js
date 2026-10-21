@@ -3,34 +3,44 @@
 
 const MIN_COMMENT_CHARS = 3;
 
+/** One-line, delimiter-safe, length-limited text. */
+const cleanLine = (value, maxChars) =>
+  String(value)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, " ") // control chars + newlines
+    .replace(/[<>]/g, " ") // so text can't fake our <comments> delimiters
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxChars);
+
 /**
  * Turn raw comments into short single-line strings that are safe to embed in a prompt.
- * Returns an array of strings (author info is already gone by this point).
+ * Returns [{ text, source }] where `source` is the original comment object, so callers can
+ * map a line number in the prompt back to its comment (author info is already gone).
  */
-const prepareForPrompt = (comments, { maxChars, maxTotalChars }) => {
+const prepareWithSources = (comments, { maxChars, maxTotalChars }) => {
   const out = [];
   let total = 0;
 
   for (const c of comments) {
-    const text = String(c.text)
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\u007f]+/g, " ") // control chars + newlines
-      .replace(/[<>]/g, " ") // so a comment can't fake our <comments> delimiters
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, maxChars);
-
+    const text = cleanLine(c.text, maxChars);
     if (text.length < MIN_COMMENT_CHARS) continue;
     if (total + text.length > maxTotalChars) break;
     total += text.length;
-    out.push(text);
+    out.push({ text, source: c });
   }
   return out;
 };
 
+/** Same as prepareWithSources but returns only the strings (used by the audience analysis). */
+const prepareForPrompt = (comments, opts) =>
+  prepareWithSources(comments, opts).map((x) => x.text);
+
 /** Bucket comment timestamps into `buckets` equal slices between oldest and newest. */
 const buildVolume = (comments, buckets = 14) => {
-  const times = comments.map((c) => c.publishedAt).filter((t) => Number.isFinite(t));
+  const times = comments
+    .map((c) => c.publishedAt)
+    .filter((t) => Number.isFinite(t));
   if (times.length === 0) return null;
 
   const min = Math.min(...times);
@@ -42,7 +52,11 @@ const buildVolume = (comments, buckets = 14) => {
   for (const t of times) {
     counts[Math.min(buckets - 1, Math.floor((t - min) / width))]++;
   }
-  return { counts, start: new Date(min).toISOString(), end: new Date(max).toISOString() };
+  return {
+    counts,
+    start: new Date(min).toISOString(),
+    end: new Date(max).toISOString(),
+  };
 };
 
 /**
@@ -68,4 +82,10 @@ const sentimentFromLabels = (labels, expected) => {
   return { positive, neutral, negative };
 };
 
-module.exports = { prepareForPrompt, buildVolume, sentimentFromLabels };
+module.exports = {
+  prepareForPrompt,
+  prepareWithSources,
+  cleanLine,
+  buildVolume,
+  sentimentFromLabels,
+};
