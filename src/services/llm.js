@@ -11,7 +11,12 @@ const chat = async ({
   model: requestedModel,
 }) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = requestedModel || process.env.OPENROUTER_MODEL;
+  const configuredModel = requestedModel || process.env.OPENROUTER_MODEL;
+  // Accept the short alias used in some local .env files, but send OpenRouter's canonical free model ID.
+  const model =
+    configuredModel === "llama-3.3-70b-instruct"
+      ? "meta-llama/llama-3.3-70b-instruct:free"
+      : configuredModel;
   if (!apiKey || !model) {
     throw new AppError(
       "CONFIG",
