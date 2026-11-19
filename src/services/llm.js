@@ -3,11 +3,21 @@ const { AppError } = require("../utils/errors");
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
 /** Send a system+user prompt to OpenRouter and return the raw text reply. */
-const chat = async ({ system, user, maxTokens, timeoutMs }) => {
+const chat = async ({
+  system,
+  user,
+  maxTokens,
+  timeoutMs,
+  model: requestedModel,
+}) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_MODEL;
+  const model = requestedModel || process.env.OPENROUTER_MODEL;
   if (!apiKey || !model) {
-    throw new AppError("CONFIG", "OPENROUTER_API_KEY / OPENROUTER_MODEL is not set", 500);
+    throw new AppError(
+      "CONFIG",
+      "OpenRouter API key or model is not configured",
+      500,
+    );
   }
 
   let res;
@@ -25,7 +35,9 @@ const chat = async ({ system, user, maxTokens, timeoutMs }) => {
         temperature: 0.2,
         max_tokens: maxTokens,
         // Some models/routers reject or ignore this; set OPENROUTER_JSON_MODE=off to omit it.
-        ...(process.env.OPENROUTER_JSON_MODE === "off" ? {} : { response_format: { type: "json_object" } }),
+        ...(process.env.OPENROUTER_JSON_MODE === "off"
+          ? {}
+          : { response_format: { type: "json_object" } }),
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -34,7 +46,11 @@ const chat = async ({ system, user, maxTokens, timeoutMs }) => {
     });
   } catch (err) {
     console.error("[llm] request failed:", err.name, err.cause?.code || "");
-    throw new AppError("LLM_ERROR", "The analysis service did not respond in time", 504);
+    throw new AppError(
+      "LLM_ERROR",
+      "The analysis service did not respond in time",
+      504,
+    );
   }
 
   const body = await res.json().catch(() => null);
@@ -46,11 +62,16 @@ const chat = async ({ system, user, maxTokens, timeoutMs }) => {
     console.error("[llm] OpenRouter error:", {
       httpStatus: res.status,
       code: e?.code,
-      message: typeof e?.message === "string" ? e.message.slice(0, 300) : undefined,
+      message:
+        typeof e?.message === "string" ? e.message.slice(0, 300) : undefined,
       provider: e?.metadata?.provider_name,
       model,
     });
-    throw new AppError("LLM_ERROR", `Analysis service error (${e?.code || res.status})`, 502);
+    throw new AppError(
+      "LLM_ERROR",
+      `Analysis service error (${e?.code || res.status})`,
+      502,
+    );
   }
 
   const choice = body?.choices?.[0];
@@ -69,11 +90,23 @@ const chat = async ({ system, user, maxTokens, timeoutMs }) => {
   }
 
   if (typeof text !== "string" || !text.trim()) {
-    console.error("[llm] empty reply:", { topLevelKeys: Object.keys(body || {}), finishReason, model });
-    throw new AppError("LLM_BAD_OUTPUT", "Analysis service returned an empty reply", 502);
+    console.error("[llm] empty reply:", {
+      topLevelKeys: Object.keys(body || {}),
+      finishReason,
+      model,
+    });
+    throw new AppError(
+      "LLM_BAD_OUTPUT",
+      "Analysis service returned an empty reply",
+      502,
+    );
   }
   if (finishReason === "length") {
-    throw new AppError("LLM_BAD_OUTPUT", "Analysis service reply was cut off", 502);
+    throw new AppError(
+      "LLM_BAD_OUTPUT",
+      "Analysis service reply was cut off",
+      502,
+    );
   }
   return { text, model: body.model || model };
 };
@@ -116,7 +149,11 @@ const parseJsonReply = (text) => {
       /* try the next candidate */
     }
   }
-  throw new AppError("LLM_BAD_OUTPUT", "Analysis service returned invalid JSON", 502);
+  throw new AppError(
+    "LLM_BAD_OUTPUT",
+    "Analysis service returned invalid JSON",
+    502,
+  );
 };
 
 module.exports = { chat, parseJsonReply };
