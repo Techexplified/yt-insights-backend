@@ -1,9 +1,14 @@
 const { AppError } = require("../utils/errors");
+const { cleanLine } = require("./audienceStats");
 
 const ENDPOINT = "https://www.googleapis.com/youtube/v3/commentThreads";
 const PAGE_SIZE = 100; // YouTube's maximum per page
 // "time" = newest first. Use "relevance" here to analyse top comments instead.
 const COMMENT_ORDER = "time";
+// Comments shorter than this (after cleaning) are dropped before analysis (see audienceStats.js).
+// We skip them HERE so they don't count toward `limit` and we still end up with a full set.
+const MIN_USABLE_CHARS = 3;
+const MIN_PAGE_REQUEST = 20; // avoid tiny follow-up requests when only a few more are needed
 
 const mapYouTubeError = (status, body) => {
   const reason = body?.error?.errors?.[0]?.reason;
@@ -51,7 +56,12 @@ const fetchTopLevelComments = async (videoId, limit, options = {}) => {
     const params = new URLSearchParams({
       part: creatorChannelId ? "snippet,replies" : "snippet",
       videoId,
-      maxResults: String(Math.min(PAGE_SIZE, limit - comments.length)),
+      maxResults: String(
+        Math.min(
+          PAGE_SIZE,
+          Math.max(limit - comments.length, MIN_PAGE_REQUEST),
+        ),
+      ),
       order: COMMENT_ORDER,
       textFormat: "plainText",
       key,
@@ -79,6 +89,8 @@ const fetchTopLevelComments = async (videoId, limit, options = {}) => {
     for (const item of body.items || []) {
       const s = item?.snippet?.topLevelComment?.snippet;
       if (!s?.textDisplay) continue;
+      if (cleanLine(s.textDisplay, 300).length < MIN_USABLE_CHARS) continue; // e.g. a lone emoji
+      if (comments.length >= limit) break;
       const comment = {
         text: s.textDisplay,
         publishedAt: Date.parse(s.publishedAt),
